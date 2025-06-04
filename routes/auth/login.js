@@ -22,13 +22,13 @@ router.post("/login", async (req, res) => {
     const sql = `SELECT * FROM users WHERE username = '${username}'`;
     db.query(sql, async (err, result) => {
         if (err) throw err;
-        if (result.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({
                 message: "User not found"
             });
         }
 
-        const user = result[0];
+        const user = result.rows[0];
         if (await argon2.verify(user.password, password)) {
             return res.status(200).json({
                 message: "Logged in"
