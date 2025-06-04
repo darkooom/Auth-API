@@ -21,7 +21,7 @@ router.post("/register", (req, res) => {
     const sql = `SELECT * FROM users WHERE username = '${username}' OR email = '${email}'`;
     db.query(sql, (err, result) => {
         if (err) throw err;
-        if (result.length > 0) {
+        if (result.rows.length > 0) {
             return res.status(405).json({
                 message: "User already exists"
             });
@@ -31,7 +31,7 @@ router.post("/register", (req, res) => {
     const sql2 = `SELECT * FROM keys WHERE key = '${key}'`;
     db.query(sql2, (err, result) => {
         if (err) throw err;
-        if (result.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({
                 message: "Key not found"
             });
@@ -41,7 +41,7 @@ router.post("/register", (req, res) => {
     const sql3 = `SELECT * FROM users WHERE key = '${key}'`;
     db.query(sql3, (err, result) => {
         if (err) throw err;
-        if (result.length > 0) {
+        if (result.rows.length > 0) {
             return res.status(409).json({
                 message: "Key already used"
             });
@@ -51,14 +51,14 @@ router.post("/register", (req, res) => {
     const sql4 = `SELECT * FROM keys WHERE key = '${key}'`;
     db.query(sql4, (err, result) => {
         if (err) throw err;
-        const keyDuration = result[0].duration;
+        const keyDuration = result.rows[0].duration;
         const keyDurationInDays = keyDuration * 30;
         const currentDate = new Date();
         const expirationDate = new Date(currentDate.getTime() + (keyDurationInDays * 24 * 60 * 60 * 1000));
         const expirationDateFormatted = expirationDate.getFullYear() + "-" + (expirationDate.getMonth() + 1) + "-" + expirationDate.getDate();
         argon2.hash(password).then(hash => {
 
-            const sql = `INSERT INTO users (username, password, email, key) VALUES ('${username}', '${hash}', '${email}', '${key}', '${expirationDateFormatted}')`;
+            const sql = `INSERT INTO users (username, password, email, key, expiration) VALUES ('${username}', '${hash}', '${email}', '${key}', '${expirationDateFormatted}')`;
             db.query(sql, (err, result) => {
                 if (err) throw err;
                 res.status(201).json({
