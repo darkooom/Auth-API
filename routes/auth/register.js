@@ -1,75 +1,58 @@
-const express = require("express");
-const router = express.Router();
+const express = require('express');
 const argon2 = require('argon2');
-
 const db = require('../../utils/database');
 
-router.post("/register", (req, res) => {
-    const { username, password, email, key, apiKey } = req.body;
-    if (apiKey !== process.env.API_KEY) {
-        return res.status(401).json({
-            message: "Invalid API Key"
-        });
+const router = express.Router();
+
+const USERNAME_REGEX = /^[a-zA-Z0-9_]{3,30}$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+router.post('/', async (req, res) => {
+  const { username, email, password } = req.body;
+
+  if (!username || !email || !password) {
+    return res.status(400).json({ message: 'username, email and password are required.' });
+  }
+
+  if (!USERNAME_REGEX.test(username)) {
+    return res.status(400).json({ message: 'Username must be 3-30 characters (letters, numbers, underscore).' });
+  }
+
+  if (!EMAIL_REGEX.test(email)) {
+    return res.status(400).json({ message: 'Please provide a valid email address.' });
+  }
+
+  if (typeof password !== 'string' || password.length < 10) {
+    return res.status(400).json({ message: 'Password must be at least 10 characters long.' });
+  }
+
+  try {
+    const existingUser = await db.query(
+      'SELECT id FROM users WHERE username = $1 OR email = $2 LIMIT 1',
+      [username, email],
+    );
+
+    if (existingUser.rowCount > 0) {
+      return res.status(409).json({ message: 'User already exists.' });
     }
 
-    if (!username || !password || !email || !key) {
-        return res.status(400).json({
-            message: "Missing fields"
-        });
-    }
+    const passwordHash = await argon2.hash(password);
 
-    const sql = `SELECT * FROM users WHERE username = '${username}' OR email = '${email}'`;
-    db.query(sql, (err, result) => {
-        if (err) throw err;
-        if (result.rows.length > 0) {
-            return res.status(405).json({
-                message: "User already exists"
-            });
-        }
+    const createdUser = await db.query(
+      `INSERT INTO users (username, email, password)
+       VALUES ($1, $2, $3)
+       RETURNING id, username, email, created_at`,
+      [username, email, passwordHash],
+    );
+
+    return res.status(201).json({
+      message: 'User created successfully.',
+      user: createdUser.rows[0],
     });
-
-    const sql2 = `SELECT * FROM keys WHERE key = '${key}'`;
-    db.query(sql2, (err, result) => {
-        if (err) throw err;
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: "Key not found"
-            });
-        }
-    });
-
-    const sql3 = `SELECT * FROM users WHERE key = '${key}'`;
-    db.query(sql3, (err, result) => {
-        if (err) throw err;
-        if (result.rows.length > 0) {
-            return res.status(409).json({
-                message: "Key already used"
-            });
-        }
-    });
-
-    const sql4 = `SELECT * FROM keys WHERE key = '${key}'`;
-    db.query(sql4, (err, result) => {
-        if (err) throw err;
-        const keyDuration = result.rows[0].duration;
-        const keyDurationInDays = keyDuration * 30;
-        const currentDate = new Date();
-        const expirationDate = new Date(currentDate.getTime() + (keyDurationInDays * 24 * 60 * 60 * 1000));
-        const expirationDateFormatted = expirationDate.getFullYear() + "-" + (expirationDate.getMonth() + 1) + "-" + expirationDate.getDate();
-        argon2.hash(password).then(hash => {
-
-            const sql = `INSERT INTO users (username, password, email, key, expiration) VALUES ('${username}', '${hash}', '${email}', '${key}', '${expirationDateFormatted}')`;
-            db.query(sql, (err, result) => {
-                if (err) throw err;
-                res.status(201).json({
-                    message: "User created"
-                });
-            });
-        }).catch(err => {
-            console.log(err);
-        });
-    });
-
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error while creating user.' });
+  }
 });
 
 module.exports = router;
