@@ -1,97 +1,137 @@
-# ⚠ In progress ⚠
+# Auth-API (Secure JWT Authentication)
 
+Produktionsnahe Auth-API mit Node.js, Express und PostgreSQL.
 
-# 🚧 API Routes 🚧
+## Features
 
-## `[GET] /`
+- Registrierung mit Argon2 Password Hashing
+- Login via Username **oder** E-Mail
+- JWT Access + Refresh Token Flow (inkl. Rotation)
+- Logout (Revocation des Refresh Tokens)
+- Authenticated `me` Endpoint
+- Passwortwechsel mit Session-Invalidierung
+- API-Key Schutz für alle Auth/Admin Endpoints
+- Parameterisierte SQL Queries (SQL-Injection Schutz)
+- Auto-Setup der benötigten Tabellen beim Start
 
-### Response
+## Setup
 
-- ✅ Status: **200**
+1. Abhängigkeiten installieren:
 
-```javascript
-message: "It works! ^^",
+```bash
+npm install
 ```
 
-## `[POST] /login`
+2. Konfiguration erstellen:
 
-### Request
+```bash
+cp .env.example .env
+```
 
-```javascript
+3. `.env` Werte setzen (insb. DB + JWT Secrets + API_KEY).
+
+4. Server starten:
+
+```bash
+npm run dev
+```
+
+## Endpoints
+
+### Public
+
+#### `GET /`
+- API Basisstatus
+
+#### `GET /health`
+- Healthcheck
+
+---
+
+### Auth (alle benötigen `x-api-key` Header)
+
+#### `POST /auth/register`
+```json
 {
-  username: string;
-  password: string;
-  apiKey: string;
+  "username": "demo_user",
+  "email": "demo@example.com",
+  "password": "VeryStrongPassword123!"
 }
 ```
 
-### Response
-
-- ✅ Status: **200**
-
-```javascript
-message: "Logged In",
-```
-
-- ❌ Status: **401**
-
-```javascript
-message: "Invalid data",
-```
-
-- ❌ Status: **404**
-
-```javascript
-message: "User not found",
-```
-
-## `[POST] /register`
-
-### Request
-
-```javascript
+#### `POST /auth/login`
+```json
 {
-  username: string;
-  password: string;
-  key: string;
-  apiKey: string;
+  "identifier": "demo_user",
+  "password": "VeryStrongPassword123!"
+}
+```
+Response enthält:
+- `accessToken`
+- `refreshToken`
+- `user`
+
+#### `POST /auth/refresh`
+```json
+{
+  "refreshToken": "<refresh-token>"
+}
+```
+Gibt neues `accessToken` + rotiertes `refreshToken` zurück.
+
+#### `POST /auth/logout`
+```json
+{
+  "refreshToken": "<refresh-token>"
 }
 ```
 
-### Response
+#### `GET /auth/me`
+Benötigt:
+- `x-api-key: <API_KEY>`
+- `Authorization: Bearer <access-token>`
 
-- ✅ Status: **201**
+#### `POST /auth/change-password`
+Benötigt:
+- `x-api-key: <API_KEY>`
+- `Authorization: Bearer <access-token>`
 
-```javascript
-message: "User created",
+```json
+{
+  "currentPassword": "VeryStrongPassword123!",
+  "newPassword": "AnotherStrongPassword456!"
+}
 ```
 
-- ❌ Status: **409**
+---
 
-```javascript
-message: "Key already used",
+### Admin (zusätzlich Bearer Token)
+
+Alle `/admin/*` Endpoints benötigen:
+- `x-api-key`
+- `Authorization: Bearer <access-token>`
+
+#### `GET /admin/users`
+Liste aller Benutzer.
+
+#### `GET /admin/users/:id`
+Einzelnen Benutzer abrufen.
+
+#### `PATCH /admin/users/:id`
+```json
+{
+  "username": "new_username",
+  "email": "new@example.com",
+  "isActive": true
+}
 ```
 
-- ❌ Status: **404**
+#### `DELETE /admin/users/:id`
+Benutzer löschen.
 
-```javascript
-message: "Key not found",
-```
+## Security Hinweise
 
-- ❌ Status: **405**
-
-```javascript
-message: "User already exists",
-```
-
-- ❌ Status: **401**
-
-```javascript
-message: "Invalid API Key",
-```
-
-- ❌ Status: **400**
-
-```javascript
-message: "Missing fields",
-```
+- Nutze lange, zufällige Secrets (`JWT_*_SECRET`, `API_KEY`)
+- Nutze HTTPS in Produktion
+- Begrenze Token-Laufzeiten in sicherheitskritischen Umgebungen
+- Ergänze optional Rate Limiting und Audit Logging
