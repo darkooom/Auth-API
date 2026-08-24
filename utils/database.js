@@ -1,22 +1,37 @@
 require('dotenv').config();
-let $console = require('Console');
+const { Pool } = require('pg');
 
-const { Client } = require('pg');
-
-const db = new Client({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASS,
+let ownsPool = true;
+let pool = new Pool({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT || 5432),
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  max: Number(process.env.DB_POOL_MAX || 10),
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
 });
 
-db.connect()
-    .then(() => {
-        $console.success('Connected to database');
-    })
-    .catch((err) => {
-        $console.error(err);
-    });
+pool.on('connect', () => {
+  console.info('Database client connected');
+});
 
-module.exports = db;
+pool.on('error', (err) => {
+  console.error(`Database error: ${err.message}`);
+});
+
+const database = {
+  query: (...args) => pool.query(...args),
+  connect: (...args) => pool.connect(...args),
+  usePool: (externalPool) => {
+    if (!externalPool || typeof externalPool.query !== 'function') throw new TypeError('database must provide a query method.');
+    pool = externalPool;
+    ownsPool = false;
+  },
+  close: async () => {
+    if (ownsPool && typeof pool.end === 'function') await pool.end();
+  },
+};
+
+module.exports = database;

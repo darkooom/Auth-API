@@ -1,10 +1,17 @@
 {
   "name": "auth-api",
-  "version": "1.0.0",
-  "description": "Simple authentication api written in node.js. Perfect to sell software",
-  "main": "index.js",
+  "version": "2.0.0",
+  "description": "Secure authentication API written in Node.js with JWT-based sessions",
+  "main": "auth-module.js",
+  "exports": {
+    ".": "./auth-module.js",
+    "./middleware": "./middleware/index.js"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "check": "find . -path ./node_modules -prune -o -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "test": "node --test"
   },
   "repository": {
     "type": "git",
@@ -14,8 +21,8 @@
     "auth",
     "api",
     "secure",
-    "licensig",
-    "hardwareid"
+    "jwt",
+    "postgres"
   ],
   "author": "NotNexx",
   "license": "ISC",
@@ -24,14 +31,18 @@
   },
   "homepage": "https://github.com/NotNexx/Auth-API#readme",
   "dependencies": {
-    "Console": "^1.1.0",
-    "argon2": "^0.31.1",
+    "argon2": "^0.45.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "express-rate-limit": "^8.6.2",
     "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
-    "nodemon": "^3.0.1",
+    "nodemailer": "^9.0.5",
     "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

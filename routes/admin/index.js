@@ -1,89 +1,136 @@
-const express = require("express");
-const router = express.Router();
+const express = require('express');
 const db = require('../../utils/database');
+const validateApiKey = require('../../middleware/validateApiKey');
+const authenticate = require('../../middleware/authenticate');
+const authorize = require('../../middleware/authorize');
 
-// Admin Section Home
-router.get("/", (req, res) => {
-    res.send("This is the admin section");
+const router = express.Router();
+
+router.use(validateApiKey);
+router.use(authenticate);
+router.use(authorize('admin'));
+
+router.get('/', (req, res) => {
+  res.status(200).json({ message: 'Admin API ready.' });
 });
 
-// Test Route
-router.get("/lol", (req, res) => {
-    res.send("looool");
+router.get('/users', async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT id, username, email, role, is_active, email_verified_at, created_at, updated_at, last_login
+       FROM users
+       ORDER BY id ASC`,
+    );
+
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
 });
 
-// Retrieve All Users
-router.get("/users", async (req, res) => {
-    try {
-        const result = await db.query("SELECT * FROM users");
-        res.status(200).json(result.rows);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "Server error" });
+router.get('/users/:id', async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ message: 'Invalid user id.' });
+  }
+
+  try {
+    const result = await db.query(
+      `SELECT id, username, email, is_active, created_at, updated_at, last_login
+       FROM users WHERE id = $1`,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
     }
+
+    return res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
 });
 
-// Retrieve a User by ID
-router.get("/users/:id", async (req, res) => {
-    const { id } = req.params;
-    try {
-        const result = await db.query("SELECT * FROM users WHERE id = $1", [id]);
-        if (result.rows.length === 0) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        res.status(200).json(result.rows[0]);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "Server error" });
+router.patch('/users/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const { username, email, isActive, role } = req.body;
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ message: 'Invalid user id.' });
+  }
+
+  const updates = [];
+  const values = [];
+
+  if (username) {
+    updates.push(`username = $${updates.length + 1}`);
+    values.push(username);
+  }
+
+  if (email) {
+    updates.push(`email = $${updates.length + 1}`);
+    values.push(email);
+  }
+
+  if (typeof isActive === 'boolean') {
+    updates.push(`is_active = $${updates.length + 1}`);
+    values.push(isActive);
+  }
+
+  if (role !== undefined) {
+    if (!['user', 'admin'].includes(role)) return res.status(400).json({ message: 'role must be user or admin.' });
+    updates.push(`role = $${updates.length + 1}`);
+    values.push(role);
+  }
+
+  if (updates.length === 0) {
+    return res.status(400).json({ message: 'No update fields provided.' });
+  }
+
+  values.push(id);
+
+  try {
+    const result = await db.query(
+      `UPDATE users
+       SET ${updates.join(', ')}, updated_at = NOW()
+       WHERE id = $${values.length}
+       RETURNING id, username, email, role, is_active, updated_at`,
+      values,
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
     }
+
+    return res.status(200).json({ message: 'User updated', user: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
 });
 
-// Update User Information
-router.put("/users/:id", async (req, res) => {
-    const { id } = req.params;
-    const { username, email } = req.body;
-    if (!username && !email) {
-        return res.status(400).json({ message: "Missing fields" });
+router.delete('/users/:id', async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ message: 'Invalid user id.' });
+  }
+
+  try {
+    const result = await db.query('DELETE FROM users WHERE id = $1', [id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
     }
 
-    try {
-        const fields = [];
-        const values = [];
-        let query = "UPDATE users SET";
-
-        if (username) {
-            fields.push("username = $1");
-            values.push(username);
-        }
-        if (email) {
-            fields.push("email = $2");
-            values.push(email);
-        }
-        values.push(id);
-
-        query += ` ${fields.join(", ")} WHERE id = $${values.length}`;
-
-        await db.query(query, values);
-        res.status(200).json({ message: "User updated" });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "Server error" });
-    }
-});
-
-// Delete a User
-router.delete("/users/:id", async (req, res) => {
-    const { id } = req.params;
-    try {
-        const result = await db.query("DELETE FROM users WHERE id = $1", [id]);
-        if (result.rowCount === 0) {
-            return res.status(404).json({ message: "User not found" });
-        }
-        res.status(200).json({ message: "User deleted" });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "Server error" });
-    }
+    return res.status(200).json({ message: 'User deleted' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Server error' });
+  }
 });
 
 module.exports = router;

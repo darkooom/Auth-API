@@ -1,75 +1,73 @@
-const express = require("express");
-const router = express.Router();
+const express = require('express');
 const argon2 = require('argon2');
-
 const db = require('../../utils/database');
+const { createOneTimeToken, hashOneTimeToken } = require('../../utils/auth/oneTimeTokens');
+const { sendAuthEmail } = require('../../utils/mailer');
+const { USERNAME_REGEX, EMAIL_REGEX, normalizeEmail, normalizeUsername, validatePassword } = require('../../utils/auth/validation');
+const { getConfig } = require('../../utils/config');
 
-router.post("/register", (req, res) => {
-    const { username, password, email, key, apiKey } = req.body;
-    if (apiKey !== process.env.API_KEY) {
-        return res.status(401).json({
-            message: "Invalid API Key"
-        });
+const router = express.Router();
+
+router.post('/', async (req, res) => {
+  const username = normalizeUsername(req.body.username);
+  const email = normalizeEmail(req.body.email);
+  const { password } = req.body;
+
+  if (!username || !email || !password) {
+    return res.status(400).json({ message: 'username, email and password are required.' });
+  }
+
+  if (!USERNAME_REGEX.test(username)) {
+    return res.status(400).json({ message: 'Username must be 3-30 characters (letters, numbers, underscore).' });
+  }
+
+  if (!EMAIL_REGEX.test(email)) {
+    return res.status(400).json({ message: 'Please provide a valid email address.' });
+  }
+
+  const passwordError = validatePassword(password);
+  if (passwordError) return res.status(400).json({ message: passwordError });
+
+  try {
+    const existingUser = await db.query(
+      'SELECT id FROM users WHERE username = $1 OR email = $2 LIMIT 1',
+      [username, email],
+    );
+
+    if (existingUser.rowCount > 0) {
+      return res.status(409).json({ message: 'User already exists.' });
     }
 
-    if (!username || !password || !email || !key) {
-        return res.status(400).json({
-            message: "Missing fields"
-        });
-    }
+    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
 
-    const sql = `SELECT * FROM users WHERE username = '${username}' OR email = '${email}'`;
-    db.query(sql, (err, result) => {
-        if (err) throw err;
-        if (result.rows.length > 0) {
-            return res.status(405).json({
-                message: "User already exists"
-            });
-        }
+    const createdUser = await db.query(
+      `INSERT INTO users (username, email, password)
+       VALUES ($1, $2, $3)
+       RETURNING id, username, email, role, email_verified_at, created_at`,
+      [username, email, passwordHash],
+    );
+
+    const user = createdUser.rows[0];
+    const verificationToken = createOneTimeToken();
+    await db.query(
+      `INSERT INTO one_time_tokens (user_id, purpose, token_hash, expires_at)
+       VALUES ($1, 'verify_email', $2, NOW() + INTERVAL '24 hours')`,
+      [user.id, hashOneTimeToken(verificationToken)],
+    );
+    const config = getConfig();
+    const verifyUrl = `${config.appUrl}/verify-email?token=${encodeURIComponent(verificationToken)}`;
+    await sendAuthEmail({ to: email, subject: 'Verify your email', text: `Verify your email address: ${verifyUrl}` });
+
+    return res.status(201).json({
+      message: 'User created successfully. Please verify your email address.',
+      user,
+      ...(config.nodeEnv !== 'production' && { verificationToken }),
     });
-
-    const sql2 = `SELECT * FROM keys WHERE key = '${key}'`;
-    db.query(sql2, (err, result) => {
-        if (err) throw err;
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                message: "Key not found"
-            });
-        }
-    });
-
-    const sql3 = `SELECT * FROM users WHERE key = '${key}'`;
-    db.query(sql3, (err, result) => {
-        if (err) throw err;
-        if (result.rows.length > 0) {
-            return res.status(409).json({
-                message: "Key already used"
-            });
-        }
-    });
-
-    const sql4 = `SELECT * FROM keys WHERE key = '${key}'`;
-    db.query(sql4, (err, result) => {
-        if (err) throw err;
-        const keyDuration = result.rows[0].duration;
-        const keyDurationInDays = keyDuration * 30;
-        const currentDate = new Date();
-        const expirationDate = new Date(currentDate.getTime() + (keyDurationInDays * 24 * 60 * 60 * 1000));
-        const expirationDateFormatted = expirationDate.getFullYear() + "-" + (expirationDate.getMonth() + 1) + "-" + expirationDate.getDate();
-        argon2.hash(password).then(hash => {
-
-            const sql = `INSERT INTO users (username, password, email, key, expiration) VALUES ('${username}', '${hash}', '${email}', '${key}', '${expirationDateFormatted}')`;
-            db.query(sql, (err, result) => {
-                if (err) throw err;
-                res.status(201).json({
-                    message: "User created"
-                });
-            });
-        }).catch(err => {
-            console.log(err);
-        });
-    });
-
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ message: 'Username or email is already in use.' });
+    console.error(err);
+    return res.status(500).json({ message: 'Server error while creating user.' });
+  }
 });
 
 module.exports = router;
